@@ -6,7 +6,7 @@ The repository introduces a solution along with a AWS Cloudformation template fo
 A potential use case in real world could be let's say an organization relies on AWS Client VPN for secure remote access to its resources. In this environment, users occasionally log in from different devices simultaneously using the same credentials, creating a potential security vulnerability. With the default behavior allowing all these connections to establish, there is a risk of unauthorized access and compromised access controls. To address this challenge, the introduced Lambda handler provides a practical solution by implementing custom logic. This use case demonstrates how organizations can enhance security and streamline user access in their AWS Client VPN environment, ensuring that only the latest connection is authorized while automatically terminating older connections associated with identical user credentials.
 ## Architecture
 
-![Architecture diagram] (./architecture.png)
+![Architecture diagram] (./s1-clientvpn.png)
 
 ## Assumptions
 
