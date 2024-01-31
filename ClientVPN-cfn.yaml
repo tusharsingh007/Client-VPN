@@ -1,0 +1,136 @@
+Parameters:
+  MicrosoftADPW:
+    Type: String
+    NoEcho: True
+  MicrosoftADShortName:
+    Type: String
+    Description: "The NetBIOS name for your domain, such as CORP."
+  subnetID1:
+    Type: String
+    Description: "The ID of the subnet in which to create the client VPN endpoint."
+  subnetID2:
+    Type: String
+    Description: "The ID of the subnet in which to create the client VPN endpoint."
+  vpcID:
+    Type: String
+    Description: "The ID of the VPC in which to create the client VPN endpoint."
+  ClientCidrBlock:
+    Type: String
+    Description: "The CIDR block to associate with the client VPN endpoint."
+  DomainName:
+    Type: String
+    Description: "The fully qualified domain name for the certificate."
+
+Resources:
+  MyDirectory: 
+    Type: AWS::DirectoryService::MicrosoftAD
+    Properties: 
+      Name: "corp.example.com"
+      Password: 
+        Ref: MicrosoftADPW
+      ShortName: 
+        Ref: MicrosoftADShortName
+      VpcSettings: 
+        SubnetIds: 
+          - Ref: subnetID1
+          - Ref: subnetID2
+        VpcId: 
+          Ref: vpcID
+    MyCertificate: 
+      Type: "AWS::CertificateManager::Certificate"
+      Properties: 
+        DomainName: !Ref DomainName
+        ValidationMethod: DNS
+  myClientVpnEndpoint:
+    Type: AWS::EC2::ClientVpnEndpoint
+    Properties: 
+      AuthenticationOptions:
+      - Type: "directory-service-authentication"
+        ActiveDirectory:
+          DirectoryId: !Ref MyDirectory
+      ClientCidrBlock: !Ref ClientCidrBlock
+      ClientConnectOptions: 
+          Enabled: true
+          LambdaFunctionArn: !GetAtt lambdaFunction.Arn
+      ConnectionLogOptions: 
+        Enabled: false
+      Description: "My Client VPN Endpoint"
+      ServerCertificateArn: !Ref MyCertificate
+      TransportProtocol: "udp"
+  lambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: AWSClientVPN-clientVPN
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt lambdaIAMRole.Arn
+      Runtime: python3.11
+      Code:
+        ZipFile: !Sub |
+          import json
+          import boto3
+          client_vpn = boto3.client('ec2', region_name='${AWS::Region}')
+          def lambda_handler(event, context):
+          #   # Get user ID
+            print(event)
+            #user_id = event["requestContext"]["identity"]["userArn"].split(":")[5]
+            user_id = event["username"]
+            client_vpn_endpoint_id = event["endpoint-id"]
+            # Check for existing connections
+            print(user_id)
+            response = client_vpn.describe_client_vpn_connections(
+              ClientVpnEndpointId=client_vpn_endpoint_id,
+                Filters=[
+                    {
+                        "Name": "username",
+                        "Values": [user_id]
+                    },
+                    {
+                        "Name": "status",
+                        "Values": ["active"]
+                    }
+                ]
+            )
+            if len(response["Connections"]) > 0:
+                # Close existing connection
+                print(response["Connections"])
+                connection_id = response["Connections"][0]["ConnectionId"]
+                client_vpn.terminate_client_vpn_connections( ClientVpnEndpointId=client_vpn_endpoint_id,ConnectionId=connection_id)
+                print("Closed existing connection")
+            # Allow new connection
+            return {
+              "allow": True,
+              "error-msg-on-failed-posture-compliance": "Failed",
+              "posture-compliance-statuses": [],
+              "schema-version": "v1"
+            }
+
+  lambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: AllowClientVPN
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateClientVpnEndpoints
+                  - ec2:DescribeClientVpnConnections
+                  - ec2:DescribeVpcEndpoints
+                  - ec2:TerminateClientVpnConnections
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'
